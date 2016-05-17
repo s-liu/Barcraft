@@ -29,13 +29,9 @@ protected:
 
 private:
 	void initGrid();
-	void updateCubeData();
-	void uploadCubeDataToVbo();
-	void mapCubeVboDataToShaderAttributeLocations();
-	float * create_cube_vertices(float xPos, float yPos, float zPos, float r, float g, float b);
-	void updateActiveCell();
-	void uploadActiveCellDataToVbo();
-	void mapActiveCellVboDataToShaderAttributeLocations();
+	void reset();
+	void prepareCubeAt(float xPos, float yPos, float zPos);
+	void prepareActiveCell();
 
 	// Fields related to the shader and uniforms.
 	ShaderProgram m_shader;
@@ -55,11 +51,14 @@ private:
 	// Matrices controlling the camera and projection.
 	glm::mat4 proj;
 	glm::mat4 view;
+	glm::mat4 world;
 
 	float ** colours;
 	int current_col;
 	int active_col, active_row;
-	int ** grid_height;
-	int ** grid_colour;
 	Grid grid;
+
+	bool is_dragging;
+	double prev_x_pos;
+	float scale_ratio;
 };

@@ -2,7 +2,6 @@
 #include "cs488-framework/GlErrorCheck.hpp"
 
 #include <iostream>
-#include <vector>
 
 #include <imgui/imgui.h>
 #include <glm/glm.hpp>
@@ -15,58 +14,25 @@ using namespace std;
 static const size_t DIM = 16;
 static const size_t COLOURS = 8;
 static const size_t VERTICES_IN_CUBE = 36;
+static const int MAX_HEIGHT = 8;
+static const float MAX_SCALE = 1.5f;
+static const float MIN_SCALE = 0.7f;
 
 //----------------------------------------------------------------------------------------
 // Constructor
 A1::A1()
-	: current_col( 0 ), grid (DIM)
+	: current_col(0),
+	  active_col(0),
+	  active_row(0),
+	  grid (DIM),
+	  is_dragging(false),
+	  prev_x_pos(-1),
+	  scale_ratio(1.0f)
 {
-	active_col = 0;
-	active_row = 0;
-
 	colours = new float*[COLOURS];
 	for (int i = 0; i < COLOURS; i++) {
 		colours[i] = new float[3];
 	}
-	// White
-	colours[0][0] = 1.0f;
-	colours[0][1] = 1.0f;
-	colours[0][2] = 1.0f;
-
-	// Green
-	colours[1][0] = 0.0f;
-	colours[1][1] = 0.392f;
-	colours[1][2] = 0.0f;
-
-	// Light yellow
-	colours[2][0] = 1.0f;
-	colours[2][1] = 0.98f;
-	colours[2][2] = 0.804f;
-
-	// Blue
-	colours[3][0] = 0.255f;
-	colours[3][1] = 0.412f;
-	colours[3][2] = 0.882f;
-
-	// Brown
-	colours[4][0] = 0.545f;
-	colours[4][1] = 0.271;
-	colours[4][2] = 0.075f;
-
-	// Pink
-	colours[5][0] = 1.0f;
-	colours[5][1] = 0.753f;
-	colours[5][2] = 0.796f;
-
-	// Orange
-	colours[6][0] = 1.0f;
-	colours[6][1] = 0.647f;
-	colours[6][2] = 0.0f;
-
-	// Lavender
-	colours[7][0] = 0.902f;
-	colours[7][1] = 0.902f;
-	colours[7][2] = 0.98f;
 }
 
 //----------------------------------------------------------------------------------------
@@ -95,11 +61,11 @@ void A1::init()
 	P_uni = m_shader.getUniformLocation( "P" );
 	V_uni = m_shader.getUniformLocation( "V" );
 	M_uni = m_shader.getUniformLocation( "M" );
-	//col_uni = m_shader.getUniformLocation( "colour" );
+	col_uni = m_shader.getUniformLocation( "colour" );
 
+	reset();
 	initGrid();
-	updateCubeData();
-	updateActiveCell();
+	
 	
 	// Set up initial view and projection matrices (need to do this here,
 	// since it depends on the GLFW window being set up correctly).
@@ -113,29 +79,54 @@ void A1::init()
 		1.0f, 1000.0f );
 }
 
-void A1::updateActiveCell() {
-	uploadActiveCellDataToVbo();
-	mapActiveCellVboDataToShaderAttributeLocations();
-}
-
-void A1::uploadActiveCellDataToVbo() {
+void A1::prepareActiveCell()
+{
+	// Vertices for active cell indicator
 	float verts[] = {
-		0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-		1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f,
-		1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f,
-		1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-		1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f
+		0.5f, 0.0f, 0.25f,
+		0.75f, 0.0f, 0.5f,
+		0.5f, -1.0f, 0.5f,
+
+		0.5f, 0.0f, 0.25f,
+		0.25f, 0.0f, 0.5f,
+		0.5f, -1.0f, 0.5f,
+
+		0.25f, 0.0f, 0.5f,
+		0.5f, 0.0f, 0.75f,
+		0.5f, -1.0f, 0.5f,
+
+		0.75f, 0.0f, 0.5f,
+		0.5f, 0.0f, 0.75f,
+		0.5f, -1.0f, 0.5f,
+
+		0.5f, 0.0f, 0.25f,
+		0.75f, 0.0f, 0.5f,
+		0.5f, 1.0f, 0.5f,
+
+		0.5f, 0.0f, 0.25f,
+		0.25f, 0.0f, 0.5f,
+		0.5f, 1.0f, 0.5f,
+
+		0.25f, 0.0f, 0.5f,
+		0.5f, 0.0f, 0.75f,
+		0.5f, 1.0f, 0.5f,
+
+		0.75f, 0.0f, 0.5f,
+		0.5f, 0.0f, 0.75f,
+		0.5f, 1.0f, 0.5f,
 	};
 
+	// Add x, y, z displacements to vertices
 	int i = 0;
-	for (int idx = 0; idx < 8; idx++) {
+	for (int idx = 0; idx < 24; idx++) {
 		verts[i] += active_col;
+		verts[i + 1] += grid.getHeight(active_col, active_row) + 2;
 		verts[i + 2] += active_row;
-		i += 6;
+		i += 3;
 	}
+
+	glGenVertexArrays(1, &m_active_cell_vao);
+	glBindVertexArray(m_active_cell_vao);
 	
 	glGenBuffers(1, &m_active_cell_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, m_active_cell_vbo);
@@ -144,24 +135,9 @@ void A1::uploadActiveCellDataToVbo() {
 		verts,
 		GL_STATIC_DRAW); 
 
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	CHECK_GL_ERRORS;
-}
-
-void A1::mapActiveCellVboDataToShaderAttributeLocations() {
-	glGenVertexArrays(1, &m_active_cell_vao);
-	glBindVertexArray(m_active_cell_vao);
-
-	glBindBuffer(GL_ARRAY_BUFFER, m_active_cell_vbo);
-
 	GLint posAttrib = m_shader.getAttribLocation("position");
 	glEnableVertexAttribArray(posAttrib);
-	glVertexAttribPointer(posAttrib, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 0);
-
-	GLint colAttrib = m_shader.getAttribLocation("colour");
-	glEnableVertexAttribArray(colAttrib);
-	glVertexAttribPointer(colAttrib, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)12);
+	glVertexAttribPointer(posAttrib, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
@@ -169,127 +145,75 @@ void A1::mapActiveCellVboDataToShaderAttributeLocations() {
 	CHECK_GL_ERRORS;
 }
 
-void A1::updateCubeData() {
-	uploadCubeDataToVbo();
-	mapCubeVboDataToShaderAttributeLocations();
-}
-
-void A1::uploadCubeDataToVbo() {
-	size_t sz = VERTICES_IN_CUBE * 3 * 2;
-	vector<vec3> cube_locs;
-	for (int i = 0; i < DIM; i++) {
-		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < grid.getHeight(i, j); k++) {
-				cube_locs.push_back(vec3(i, k, j));
-			}
-		}
-	}
-	int num_of_cubes = cube_locs.size();
-
-	cerr << num_of_cubes << endl;
-
-	float* verts = new float[sz * num_of_cubes];
-	for (int i = 0; i < num_of_cubes; i++) {
-		int col_index = grid.getColour(cube_locs[i].x, cube_locs[i].z);
-		float* cube_verts = create_cube_vertices(
-			cube_locs[i].x,
-			cube_locs[i].y,
-			cube_locs[i].z,
-			colours[col_index][0],
-			colours[col_index][1], 
-			colours[col_index][2]);
-		memcpy(verts + i * sz, cube_verts, sz * sizeof(float));
-		delete[] cube_verts;
-	}
-
-	glGenBuffers(1, &m_cube_vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, m_cube_vbo);
-	glBufferData(GL_ARRAY_BUFFER,
-		sz * num_of_cubes * sizeof(float),
-		verts,
-		GL_STATIC_DRAW);
-
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	delete[] verts;
-	CHECK_GL_ERRORS;
-}
-
-void A1::mapCubeVboDataToShaderAttributeLocations()
+void A1::prepareCubeAt(float xPos, float yPos, float zPos)
 {
-	
-	glGenVertexArrays(1, &m_cube_vao);
-	glBindVertexArray(m_cube_vao);
-
-	glBindBuffer(GL_ARRAY_BUFFER, m_cube_vbo);
-
-	GLint posAttrib = m_shader.getAttribLocation("position");
-	glEnableVertexAttribArray(posAttrib);
-	glVertexAttribPointer(posAttrib, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 0);
-
-	GLint colAttrib = m_shader.getAttribLocation("colour");
-	glEnableVertexAttribArray(colAttrib);
-	glVertexAttribPointer(colAttrib, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)12);
-
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0);
-	
-	CHECK_GL_ERRORS;
-}
-
-float* A1::create_cube_vertices(float xPos, float yPos, float zPos, float r, float g, float b) {
-
-	float* verts_ptr = new float[VERTICES_IN_CUBE * 3 * 2];
+	// Vertices for a cube
 	float verts[] = {
-		0.0f, 0.0f, 0.0f, r, g, b,
-		0.0f, 0.0f, 1.0f, r, g, b,
-		0.0f, 1.0f, 1.0f, r, g, b,
-		1.0f, 1.0f, 0.0f, r, g, b,
-		0.0f, 0.0f, 0.0f, r, g, b,
-		0.0f, 1.0f, 0.0f, r, g, b,
-		1.0f, 0.0f, 1.0f, r, g, b,
-		0.0f, 0.0f, 0.0f, r, g, b,
-		1.0f, 0.0f, 0.0f, r, g, b,
-		1.0f, 1.0f, 0.0f, r, g, b,
-		1.0f, 0.0f, 0.0f, r, g, b,
-		0.0f, 0.0f, 0.0f, r, g, b,
-		0.0f, 0.0f, 0.0f, r, g, b,
-		0.0f, 1.0f, 1.0f, r, g, b,
-		0.0f, 1.0f, 0.0f, r, g, b,
-		1.0f, 0.0f, 1.0f, r, g, b,
-		0.0f, 0.0f, 1.0f, r, g, b,
-		0.0f, 0.0f, 0.0f, r, g, b,
-		0.0f, 1.0f, 1.0f, r, g, b,
-		0.0f, 0.0f, 1.0f, r, g, b,
-		1.0f, 0.0f, 1.0f, r, g, b,
-		1.0f, 1.0f, 1.0f, r, g, b,
-		1.0f, 0.0f, 0.0f, r, g, b,
-		1.0f, 1.0f, 0.0f, r, g, b,
-		1.0f, 0.0f, 0.0f, r, g, b,
-		1.0f, 1.0f, 1.0f, r, g, b,
-		1.0f, 0.0f, 1.0f, r, g, b,
-		1.0f, 1.0f, 1.0f, r, g, b,
-		1.0f, 1.0f, 0.0f, r, g, b,
-		0.0f, 1.0f, 0.0f, r, g, b,
-		1.0f, 1.0f, 1.0f, r, g, b,
-		0.0f, 1.0f, 0.0f, r, g, b,
-		0.0f, 1.0f, 1.0f, r, g, b,
-		1.0f, 1.0f, 1.0f, r, g, b,
-		0.0f, 1.0f, 1.0f, r, g, b,
-		1.0f, 0.0f, 1.0f, r, g, b
+		0.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f,
+		1.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		1.0f, 1.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 1.0f,
+		0.0f, 1.0f, 0.0f,
+		1.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		1.0f, 0.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 0.0f, 0.0f,
+		1.0f, 1.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 0.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 0.0f,
+		0.0f, 1.0f, 0.0f,
+		1.0f, 1.0f, 1.0f,
+		0.0f, 1.0f, 0.0f,
+		0.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		0.0f, 1.0f, 1.0f,
+		1.0f, 0.0f, 1.0f,
 	};
 
+	// Add x, y, z displacements to vertices
 	int i = 0;
 	for (int idx = 0; idx < VERTICES_IN_CUBE; idx++) {
 		verts[i] = verts[i] + xPos;
 		verts[i+1] = verts[i+1] + yPos;
 		verts[i+2] = verts[i+2] + zPos;
-		i += 6;
+		i += 3;
 	}
 
-	memcpy(verts_ptr, &verts, VERTICES_IN_CUBE * 3 * 2 * sizeof(float));
+	glGenVertexArrays(1, &m_cube_vao);
+	glBindVertexArray(m_cube_vao);
 
-	return verts_ptr;
+	glGenBuffers(1, &m_cube_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, m_cube_vbo);
+	glBufferData(GL_ARRAY_BUFFER,
+		sizeof(verts),
+		verts,
+		GL_STATIC_DRAW);
+	
+	GLint posAttrib = m_shader.getAttribLocation("position");
+	glEnableVertexAttribArray(posAttrib);
+	glVertexAttribPointer(posAttrib, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+	
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
+
+	CHECK_GL_ERRORS;
 }
 
 void A1::initGrid()
@@ -343,6 +267,60 @@ void A1::initGrid()
 	CHECK_GL_ERRORS;
 }
 
+void A1::reset()
+{
+	// Resets grid, active cell and colour
+	grid.reset();
+	active_col = 0;
+	active_row = 0;
+	current_col = 0;
+
+	// Green
+	colours[0][0] = 0.0f;
+	colours[0][1] = 0.392f;
+	colours[0][2] = 0.0f;
+
+	// Lavender
+	colours[1][0] = 0.902f;
+	colours[1][1] = 0.902f;
+	colours[1][2] = 0.98f;
+
+	// Light yellow
+	colours[2][0] = 1.0f;
+	colours[2][1] = 0.98f;
+	colours[2][2] = 0.804f;
+
+	// Blue
+	colours[3][0] = 0.255f;
+	colours[3][1] = 0.412f;
+	colours[3][2] = 0.882f;
+
+	// Brown
+	colours[4][0] = 0.545f;
+	colours[4][1] = 0.271;
+	colours[4][2] = 0.075f;
+
+	// Pink
+	colours[5][0] = 1.0f;
+	colours[5][1] = 0.753f;
+	colours[5][2] = 0.796f;
+
+	// Orange
+	colours[6][0] = 1.0f;
+	colours[6][1] = 0.647f;
+	colours[6][2] = 0.0f;
+	
+	// White
+	colours[7][0] = 1.0f;
+	colours[7][1] = 1.0f;
+	colours[7][2] = 1.0f;
+
+	// Resets view
+	world = mat4();
+	world = glm::translate(world, vec3(-float(DIM) / 2.0f, 0, -float(DIM) / 2.0f));
+	scale_ratio = 1.0f;
+}
+
 //----------------------------------------------------------------------------------------
 /*
  * Called once per frame, before guiLogic().
@@ -350,6 +328,7 @@ void A1::initGrid()
 void A1::appLogic()
 {
 	// Place per frame, application logic here ...
+	prepareActiveCell();
 }
 
 //----------------------------------------------------------------------------------------
@@ -384,20 +363,20 @@ void A1::guiLogic()
 		// displayed.
 		for (int i = 0; i < 8; i++) {
 			ImGui::PushID(i);
-			if (ImGui::ColorEdit3("##Colour", colours[i])) {
-				// Modify the colour
-				updateCubeData();
-			}
+			ImGui::ColorEdit3("##Colour", colours[i]);
 			ImGui::SameLine();
 			if (ImGui::RadioButton("##Col", &current_col, i)) {
 				// Select this colour.
 				current_col = i;
 				grid.setColour(active_col, active_row, current_col);
-				updateCubeData();
 			}
 			ImGui::PopID();
 		}
 
+		if (ImGui::Button("Reset")) {
+			reset();
+		}
+/*
 		// For convenience, you can uncomment this to show ImGui's massive
 		// demonstration window right in your application.  Very handy for
 		// browsing around to get the widget you want.  Then look in 
@@ -405,7 +384,7 @@ void A1::guiLogic()
 		if( ImGui::Button( "Test Window" ) ) {
 			showTestWindow = !showTestWindow;
 		}
-
+*/
 
 		ImGui::Text( "Framerate: %.1f FPS", ImGui::GetIO().Framerate );
 
@@ -422,35 +401,39 @@ void A1::guiLogic()
  */
 void A1::draw()
 {
-	// Create a global transformation for the model (centre it).
-	mat4 W;
-	W = glm::translate( W, vec3( -float(DIM)/2.0f, 0, -float(DIM)/2.0f ) );
-
 	m_shader.enable();
-		//glEnable( GL_DEPTH_TEST );
+		glEnable( GL_DEPTH_TEST );
 
 		glUniformMatrix4fv( P_uni, 1, GL_FALSE, value_ptr( proj ) );
 		glUniformMatrix4fv( V_uni, 1, GL_FALSE, value_ptr( view ) );
-		glUniformMatrix4fv( M_uni, 1, GL_FALSE, value_ptr( W ) );
+		glUniformMatrix4fv( M_uni, 1, GL_FALSE, value_ptr( world ) );
 
 		// Just draw the grid for now.
 		glBindVertexArray( m_grid_vao );
-		//glUniform3f( col_uni, 1, 1, 1 );
+		glUniform3f( col_uni, 1, 1, 1 );
 		glDrawArrays( GL_LINES, 0, (3+DIM)*4 );
 
 		// Draw the cubes
-		int num_of_cubes = 0;
 		for (int i = 0; i < DIM; i++) {
 			for (int j = 0; j < DIM; j++) {
-				num_of_cubes += grid.getHeight(i, j);
+				int colour_index = grid.getColour(i, j);
+				glUniform3f(
+					col_uni, 
+					colours[colour_index][0], 
+					colours[colour_index][1], 
+					colours[colour_index][2]);
+				for (int k = 0; k < grid.getHeight(i, j); k++) {
+					prepareCubeAt(i, k, j);
+					glBindVertexArray(m_cube_vao);
+					glDrawArrays(GL_TRIANGLES, 0, VERTICES_IN_CUBE);
+				}
 			}
 		}
-		glBindVertexArray(m_cube_vao);
-		glDrawArrays(GL_TRIANGLES, 0, VERTICES_IN_CUBE * num_of_cubes);
 
 		// Highlight the active square.
 		glBindVertexArray(m_active_cell_vao);
-		glDrawArrays(GL_LINES, 0, 8);
+		glUniform3f(col_uni, 0.878f, 1.0f, 1.0f);
+		glDrawArrays(GL_TRIANGLES, 0, 24);
 	m_shader.disable();
 
 	// Restore defaults
@@ -470,9 +453,8 @@ void A1::cleanup()
 /*
  * Event handler.  Handles cursor entering the window area events.
  */
-bool A1::cursorEnterWindowEvent (
-		int entered
-) {
+bool A1::cursorEnterWindowEvent (int entered)
+{
 	bool eventHandled(false);
 
 	// Fill in with event handling code...
@@ -494,6 +476,14 @@ bool A1::mouseMoveEvent(double xPos, double yPos)
 		// Probably need some instance variables to track the current
 		// rotation amount, and maybe the previous X position (so 
 		// that you can rotate relative to the *change* in X.
+		if (is_dragging) {
+			double deltaX = xPos - prev_x_pos;
+			world = glm::translate(world, vec3(float(DIM) / 2.0f, 0, float(DIM) / 2.0f));
+			world = glm::rotate(world, glm::radians(float(deltaX/3)), vec3(0, 1, 0));
+			world = glm::translate(world, vec3(-float(DIM) / 2.0f, 0, -float(DIM) / 2.0f));
+		}
+		prev_x_pos = xPos;
+		eventHandled = true;
 	}
 
 	return eventHandled;
@@ -503,12 +493,15 @@ bool A1::mouseMoveEvent(double xPos, double yPos)
 /*
  * Event handler.  Handles mouse button events.
  */
-bool A1::mouseButtonInputEvent(int button, int actions, int mods) {
+bool A1::mouseButtonInputEvent(int button, int actions, int mods)
+{
 	bool eventHandled(false);
 
 	if (!ImGui::IsMouseHoveringAnyWindow()) {
 		// The user clicked in the window.  If it's the left
 		// mouse button, initiate a rotation.
+		is_dragging = button == GLFW_MOUSE_BUTTON_LEFT && actions == GLFW_PRESS;
+		eventHandled = true;
 	}
 
 	return eventHandled;
@@ -518,10 +511,20 @@ bool A1::mouseButtonInputEvent(int button, int actions, int mods) {
 /*
  * Event handler.  Handles mouse scroll wheel events.
  */
-bool A1::mouseScrollEvent(double xOffSet, double yOffSet) {
+bool A1::mouseScrollEvent(double xOffSet, double yOffSet)
+{
 	bool eventHandled(false);
 
 	// Zoom in or out.
+	world = glm::translate(world, vec3(float(DIM) / 2.0f, 0, float(DIM) / 2.0f));
+	world = glm::scale(world, vec3(1 / scale_ratio, 1 / scale_ratio, 1 / scale_ratio));
+	scale_ratio += float(yOffSet / 40);
+	// Limit the scale ratio within reasonable bounds
+	scale_ratio = min(scale_ratio, MAX_SCALE);
+	scale_ratio = max(scale_ratio, MIN_SCALE);
+	world = glm::scale(world, vec3(scale_ratio, scale_ratio, scale_ratio));
+	world = glm::translate(world, vec3(-float(DIM) / 2.0f, 0, -float(DIM) / 2.0f));
+	eventHandled = true;
 
 	return eventHandled;
 }
@@ -530,7 +533,8 @@ bool A1::mouseScrollEvent(double xOffSet, double yOffSet) {
 /*
  * Event handler.  Handles window resize events.
  */
-bool A1::windowResizeEvent(int width, int height) {
+bool A1::windowResizeEvent(int width, int height)
+{
 	bool eventHandled(false);
 
 	// Fill in with event handling code...
@@ -542,7 +546,8 @@ bool A1::windowResizeEvent(int width, int height) {
 /*
  * Event handler.  Handles key input events.
  */
-bool A1::keyInputEvent(int key, int action, int mods) {
+bool A1::keyInputEvent(int key, int action, int mods)
+{
 	bool eventHandled(false);
 
 	// Fill in with event handling code...
@@ -551,20 +556,18 @@ bool A1::keyInputEvent(int key, int action, int mods) {
 		switch(key) {
 			case GLFW_KEY_SPACE:
 				// SPACE key
-				cout << "SPACE key pressed" << endl;
-				if (grid.getHeight(active_col, active_row) < 10) {
-					grid.setColour(active_col, active_row, current_col);
+				if (grid.getHeight(active_col, active_row) < MAX_HEIGHT) {
+					// Change colour to active colour on empty cells
+					if (grid.getHeight(active_col, active_row) == 0) {
+						grid.setColour(active_col, active_row, current_col);
+					}
 					grid.setHeight(active_col, active_row, grid.getHeight(active_col, active_row) + 1);
-					updateCubeData();
 				}
 				break;
 			case GLFW_KEY_BACKSPACE:
 				// BACKSPACE Key
-				cout << "BACKSPACE key pressed" << endl;
 				if (grid.getHeight(active_col, active_row) > 0) {
-					grid.setColour(active_col, active_row, current_col);
 					grid.setHeight(active_col, active_row, grid.getHeight(active_col, active_row) - 1);
-					updateCubeData();
 				}
 				break;
 			case GLFW_KEY_RIGHT:
@@ -574,9 +577,7 @@ bool A1::keyInputEvent(int key, int action, int mods) {
 					if (mods == GLFW_MOD_SHIFT) {
 						grid.setHeight(active_col, active_row, grid.getHeight(active_col - 1, active_row));
 						grid.setColour(active_col, active_row, grid.getColour(active_col - 1, active_row));
-						updateCubeData();
 					}
-					updateActiveCell();
 				}
 				break;
 			case GLFW_KEY_LEFT:
@@ -586,9 +587,7 @@ bool A1::keyInputEvent(int key, int action, int mods) {
 					if (mods == GLFW_MOD_SHIFT) {
 						grid.setHeight(active_col, active_row, grid.getHeight(active_col + 1, active_row));
 						grid.setColour(active_col, active_row, grid.getColour(active_col + 1, active_row));
-						updateCubeData();
 					}
-					updateActiveCell();
 				}
 				break;
 			case GLFW_KEY_DOWN:
@@ -598,22 +597,26 @@ bool A1::keyInputEvent(int key, int action, int mods) {
 					if (mods == GLFW_MOD_SHIFT) {
 						grid.setHeight(active_col, active_row, grid.getHeight(active_col, active_row - 1));
 						grid.setColour(active_col, active_row, grid.getColour(active_col, active_row - 1));
-						updateCubeData();
 					}
-					updateActiveCell();
 				}
 				break;
 			case GLFW_KEY_UP:
 				// UP key
 				if (active_row > 0) {
 					active_row--;
-					updateActiveCell();
 					if (mods == GLFW_MOD_SHIFT) {
 						grid.setHeight(active_col, active_row, grid.getHeight(active_col, active_row + 1));
 						grid.setColour(active_col, active_row, grid.getColour(active_col, active_row + 1));
-						updateCubeData();
 					}
 				}
+				break;
+			case GLFW_KEY_R:
+				// R key
+				reset();
+				break;
+			case GLFW_KEY_Q:
+				// Q key
+				glfwSetWindowShouldClose(m_window, GL_TRUE);
 				break;
 		}
 	}
