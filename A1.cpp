@@ -520,8 +520,8 @@ bool A1::mouseScrollEvent(double xOffSet, double yOffSet)
 	world = glm::scale(world, vec3(1 / scale_ratio, 1 / scale_ratio, 1 / scale_ratio));
 	scale_ratio += float(yOffSet / 40);
 	// Limit the scale ratio within reasonable bounds
-	scale_ratio = min(scale_ratio, MAX_SCALE);
-	scale_ratio = max(scale_ratio, MIN_SCALE);
+	scale_ratio = glm::min(scale_ratio, MAX_SCALE);
+	scale_ratio = glm::max(scale_ratio, MIN_SCALE);
 	world = glm::scale(world, vec3(scale_ratio, scale_ratio, scale_ratio));
 	world = glm::translate(world, vec3(-float(DIM) / 2.0f, 0, -float(DIM) / 2.0f));
 	eventHandled = true;
